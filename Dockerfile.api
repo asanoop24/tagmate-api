@@ -1,0 +1,24 @@
+FROM python:3.11.1-slim
+
+RUN --mount=type=cache,target=/var/lib/apt/list,sharing=locked \
+    apt-get update && \
+    apt-get install -y g++
+
+WORKDIR "/applications"
+COPY tagmate/requirements.txt /applications/
+
+RUN --mount=type=cache,target=/root/.cache \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+
+COPY tagmate/routers/ /applications/tagmate/routers/
+COPY tagmate/utils/ /applications/tagmate/utils/
+COPY tagmate/app.py /applications/tagmate/app.py
+
+ENV PYTHONPATH="/applications"
+ENV N_UVICORN_WORKERS=5
+
+EXPOSE 8000
+
+CMD uvicorn tagmate.app:app --reload --workers ${N_UVICORN_WORKERS} --host 0.0.0.0 --port 8000

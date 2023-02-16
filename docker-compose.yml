@@ -1,0 +1,54 @@
+version: "3.7"
+
+services:
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./.volumes/postgres:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: ./Dockerfile.api
+    container_name: api
+    restart: always
+    environment:
+      - JWT_SECRET=535f6cd72079e2d7eee8251816977b14c0623e3814fecfe1803b7a9c2f498565
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_BUCKET=tagmate
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - 8000:8000
+    volumes:
+      - ./tagmate:/applications/tagmate
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: minio server /data --console-address ":9001"
+    restart: always
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - 9000:9000
+      - 9001:9001
+    volumes:
+      - ./.volumes/minio:/data
+
+
+networks:
+  tagmate:
+    driver: bridge
+    name: tagmate
