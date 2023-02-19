@@ -1,19 +1,31 @@
+import time
+import uuid
 from os import getenv as env
 from os.path import join
-from fastapi import Depends, APIRouter, Form, UploadFile, File
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from tortoise import exceptions as TortoiseExceptions
-import uuid
-import time
-import pandas as pd
 
-from tagmate.models.py.user import User
-from tagmate.models.py.activity import Activity, ActivityId, ActivityCreate, Document
-from tagmate.models.db.user import User as UserTable
+from tagmate.exceptions import activity as ActivityExceptions
+from tagmate.exceptions import auth as AuthExceptions
 from tagmate.models.db.activity import Activity as ActivityTable
-from tagmate.exceptions import auth as AuthExceptions, activity as ActivityExceptions
-from tagmate.utils.auth import authenticate_with_token
+from tagmate.models.db.activity import Document as DocumentTable
+from tagmate.models.db.user import User as UserTable
+from tagmate.models.py.activity import (
+    Activity,
+    ActivityCreate,
+    ActivityId,
+    ActivityStatus,
+    ActivityStatusEnum,
+    ActivityTaskEnum,
+    Document,
+)
+from tagmate.models.py.user import User
 from tagmate.storage.minio import MinioObjectStore
-
+from tagmate.utils import constants as C
+from tagmate.utils.auth import authenticate_with_token
+from tagmate.utils.functions import bytes_to_df
+from tagmate.utils.validations import validate_activity_exists, validate_user_exists
 
 MINIO_BUCKET = env("MINIO_BUCKET", "tagmate")
 
@@ -21,7 +33,7 @@ MINIO_BUCKET = env("MINIO_BUCKET", "tagmate")
 router = APIRouter(prefix="/activity", tags=["activity"])
 
 
-@router.post("/create", response_model=ActivityId)
+@router.post("/create", response_model=ActivityStatus)
 async def create_activity(
     name: str = Form(..., description="name of the activity"),
     task: str = Form(..., description="task of the activity"),
@@ -31,13 +43,9 @@ async def create_activity(
     if not email:
         raise AuthExceptions.InvalidToken()
 
-    try:
-        user = await UserTable.get(email=email).values()
-    except TortoiseExceptions.DoesNotExist:
-        raise AuthExceptions.InvalidUsername()
+    user = await validate_user_exists(email)
 
-    user_id = user.get("id")
-    print(f"user_id: {user_id}")
+    user_id = user.id
 
     # activities = await ActivityTable.get(user_id=user_id).values()
     # activity_exists = any([activity.name == act.name for act in activities])
@@ -74,7 +82,25 @@ async def create_activity(
         storage_path=storage_path,
     )
 
-    return ActivityId(id=_id)
+    df = bytes_to_df(bytes_data)
+    df = df.rename(columns={"review": C.DATASET_TEXT_COLUMN_NAME})
+
+    documents = df[[C.DATASET_INDEX_COLUMN_NAME, C.DATASET_TEXT_COLUMN_NAME]].to_dict(
+        orient="records"
+    )
+
+    await DocumentTable.bulk_create(
+        [
+            DocumentTable(
+                index=doc[C.DATASET_INDEX_COLUMN_NAME],
+                text=doc[C.DATASET_TEXT_COLUMN_NAME],
+                activity_id=_id,
+            )
+            for doc in documents
+        ]
+    )
+
+    return ActivityStatus(id=_id, status=ActivityStatusEnum.created)
 
 
 @router.get("/list", response_model=list[Activity])
@@ -82,10 +108,7 @@ async def fetch_all_activities(email: str = Depends(authenticate_with_token)):
     if not email:
         raise AuthExceptions.InvalidToken()
 
-    try:
-        user = await UserTable.get(email=email)
-    except TortoiseExceptions.DoesNotExist:
-        raise AuthExceptions.InvalidUsername()
+    user = await validate_user_exists(email)
 
     user_id = user.id
 
@@ -104,19 +127,10 @@ async def fetch_one_activity(
     if not email:
         raise AuthExceptions.InvalidToken()
 
-    try:
-        user = await UserTable.get(email=email).values()
-    except TortoiseExceptions.DoesNotExist:
-        raise AuthExceptions.InvalidUsername()
+    user = await validate_user_exists(email)
+    user_id = user.id
 
-    user_id = user.get("id")
-    print(f"user_id: {user_id}")
-
-    print(activity_id)
-    try:
-        activity = await ActivityTable.get(user_id=user_id, id=activity_id).values()
-    except TortoiseExceptions.DoesNotExist:
-        activity = []
+    activity = await validate_activity_exists(user_id, activity_id)
 
     return Activity(**activity)
 
@@ -128,36 +142,69 @@ async def fetch_activity_data(
     if not email:
         raise AuthExceptions.InvalidToken()
 
-    try:
-        user = await UserTable.get(email=email)
-    except TortoiseExceptions.DoesNotExist:
-        raise AuthExceptions.InvalidUsername()
-
+    user = await validate_user_exists(email)
     user_id = user.id
-    print(f"user_id: {user_id}")
 
-    print(activity_id)
-    try:
-        activity = await ActivityTable.get(user_id=user_id, id=activity_id)
-    except TortoiseExceptions.DoesNotExist:
-        activity = []
+    activity = await validate_activity_exists(user_id, activity_id)
 
     storage_path = activity.storage_path
-    from io import StringIO
-
 
     try:
         client = MinioObjectStore()
         bytes_data = client.download_object_as_bytes(
             bucket_name=MINIO_BUCKET, object_name=storage_path
         )
-        print(type(bytes_data))
     except Exception as err:
         raise ActivityExceptions.FileDownloadError(detail=f"{type(err)}: {err}")
-    
-    s = str(bytes_data, "utf-8")
-    data = StringIO(s)
-    df = pd.read_csv(data).reset_index().rename(columns={"review": "text"})
+
+    df = bytes_to_df(bytes_data)
+    df = df.rename(columns={"review": "text"})
+
     documents = df[["index", "text"]].to_dict(orient="records")
 
     return [Document(**doc) for doc in documents]
+
+
+@router.get("/{activity_id}/load", response_model=list[Document])
+async def fetch_activity_data(
+    activity_id: str, email: str = Depends(authenticate_with_token)
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    await validate_activity_exists(user_id, activity_id)
+
+    try:
+        documents = await DocumentTable.filter(activity_id=activity_id)
+    except TortoiseExceptions.DoesNotExist:
+        documents = []
+
+    return documents
+
+
+@router.post("/{activity_id}/save", response_model=ActivityStatus)
+async def fetch_activity_data(
+    activity_id: str,
+    documents: list[Document],
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    await validate_activity_exists(user_id, activity_id)
+
+    try:
+        await DocumentTable.bulk_update(
+            objects=[DocumentTable(id=doc.id, labels=doc.labels) for doc in documents],
+            fields=["labels"],
+        )
+    except Exception as err:
+        raise ActivityExceptions.ActivitySaveError()
+
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.saved)

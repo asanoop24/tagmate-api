@@ -1,6 +1,6 @@
-from tortoise.models import Model
-from tortoise import fields, run_async, Tortoise
+from tortoise import Tortoise, fields, run_async
 from tortoise.contrib.postgres.fields import ArrayField
+from tortoise.models import Model
 
 from tagmate.utils.database import DB_URI
 
@@ -30,15 +30,6 @@ class Document(Model):
     activity = fields.ForeignKeyField(model_name="models.Activity", to_field="id")
     labels = fields.JSONField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
-
-
-# class EntityClassificationDocument(Document):
-#     entities = fields.JSONField(null=True)
-
-
-# class MultiLabelClassificationDocument(Document):
-#     tags = ArrayField(element_type="text", null=True)
-#     # entities = fields.JSONField()
 
 
 async def db_init(db_url=None):
