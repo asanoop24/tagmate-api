@@ -9,7 +9,6 @@ class ActivityDoesNotExist(HTTPException):
         detail="No activity exists for this user",
         exception=None,
     ):
-        logger.info("enjoying")
         logger.exception(exception)
         super().__init__(status_code=status_code, detail=detail)
 
