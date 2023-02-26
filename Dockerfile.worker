@@ -11,7 +11,6 @@ RUN --mount=type=cache,target=/root/.cache \
     pip install --upgrade pip && \
     pip install -r requirements.txt
 
-COPY tagmate/routers/ /applications/tagmate/routers/
 COPY tagmate/models/ /applications/tagmate/models/
 COPY tagmate/storage/ /applications/tagmate/storage/
 COPY tagmate/exceptions/ /applications/tagmate/exceptions/
@@ -19,8 +18,5 @@ COPY tagmate/utils/ /applications/tagmate/utils/
 COPY tagmate/*.py /applications/tagmate/
 
 ENV PYTHONPATH="/applications"
-ENV N_UVICORN_WORKERS=5
 
-EXPOSE 8000
-
-CMD uvicorn tagmate.app:app --reload --workers ${N_UVICORN_WORKERS} --host 0.0.0.0 --port 8000
+CMD arq tagmate.worker.WorkerSettings --custom-log-dict  tagmate.worker.LoggerSettings

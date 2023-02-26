@@ -44,5 +44,5 @@ async def validate_activity_exists(user_id: str, activity_id: str) -> Activity:
     try:
         activity = await ActivityTable.get(user_id=user_id, id=activity_id)
         return activity
-    except TortoiseExceptions.DoesNotExist as err:
-        raise ActivityExceptions.ActivityDoesNotExist(exception=err)
+    except TortoiseExceptions.DoesNotExist as exc:
+        raise ActivityExceptions.ActivityDoesNotExist(exception=exc)

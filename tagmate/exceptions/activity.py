@@ -1,5 +1,5 @@
 from fastapi import HTTPException, status
-from tagmate.logs import logger
+from tagmate.logging.app import logger
 
 
 class ActivityDoesNotExist(HTTPException):
@@ -51,6 +51,17 @@ class ActivitySaveError(HTTPException):
         self,
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Could not update the activity data",
+        exception=None,
+    ):
+        logger.exception(exception)
+        super().__init__(status_code=status_code, detail=detail)
+
+
+class RedisConnectionError(HTTPException):
+    def __init__(
+        self,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not connect to redis",
         exception=None,
     ):
         logger.exception(exception)

@@ -20,6 +20,10 @@ class BaseObjectStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def upload_objects_from_folder(self, bucket_name: str, object_name: str, file_path: str):
+        raise NotImplementedError
+
+    @abstractmethod
     def upload_object_from_bytes(self, bucket_name: str, object_name: str, data: Any):
         raise NotImplementedError
 

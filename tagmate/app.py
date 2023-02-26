@@ -1,16 +1,12 @@
-import os
-
-from fastapi import Depends, FastAPI, UploadFile
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 from tortoise.contrib.fastapi import register_tortoise
 
-from tagmate.logs import init_logger
+from tagmate.logging.app import init_logger
 from tagmate.routers import activity, user
 from tagmate.utils.database import DB_URI
 
-# from tagmate.utils.auth import authenticate_with_token
-# from tagmate.utils import exceptions as E
 
 init_logger()
 app = FastAPI()

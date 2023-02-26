@@ -66,4 +66,4 @@ def init_logger():
         logging.getLogger(module).addFilter(RouteFilter())
 
 
-logger = logging.getLogger("root.tagmate")
+logger = logging.getLogger("tagmate.app")

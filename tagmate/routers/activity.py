@@ -1,7 +1,11 @@
 import time
 import uuid
 from os import getenv as env
-from os.path import join
+from os.path import join as joinpath
+from arq import create_pool
+from arq.connections import RedisSettings
+from arq.jobs import Job
+import redis  # type: ignore
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from tortoise import exceptions as TortoiseExceptions
@@ -16,18 +20,16 @@ from tagmate.models.py.activity import (
     ActivityCreate,
     ActivityId,
     ActivityStatus,
-    ActivityStatusEnum,
-    ActivityTaskEnum,
     Document,
 )
+from tagmate.models.enums import ActivityStatusEnum, ActivityTaskEnum
 from tagmate.models.py.user import User
 from tagmate.storage.minio import MinioObjectStore
-from tagmate.utils import constants as C
+from tagmate.utils.constants import UPLOADS_BUCKET, DATASET_INDEX_COLUMN_NAME, DATASET_TEXT_COLUMN_NAME
 from tagmate.utils.auth import authenticate_with_token
 from tagmate.utils.functions import bytes_to_df
 from tagmate.utils.validations import validate_activity_exists, validate_user_exists
 
-MINIO_BUCKET = env("MINIO_BUCKET", "tagmate")
 
 
 router = APIRouter(prefix="/activity", tags=["activity"])
@@ -45,36 +47,31 @@ async def create_activity(
 
     user = await validate_user_exists(email)
 
-    user_id = user.id
-
-    # activities = await ActivityTable.get(user_id=user_id).values()
-    # activity_exists = any([activity.name == act.name for act in activities])
-    # if activity_exists:
-    #     raise ActivityExceptions.ActivityAlreadyExists
+    user_id = str(user.id)
+    activity_id = str(uuid.uuid4())
 
     file_name = data.filename
-    storage_path = join(str(user_id), f"{time.time_ns()}__{file_name}")
+    storage_path = joinpath(user_id, activity_id, file_name)
 
     try:
         client = MinioObjectStore()
 
-        if not client.bucket_exists(MINIO_BUCKET):
-            client.create_bucket(MINIO_BUCKET)
+        if not client.bucket_exists(UPLOADS_BUCKET):
+            client.create_bucket(UPLOADS_BUCKET)
 
         bytes_data = await data.read()
 
         client.upload_object_from_bytes(
-            bucket_name=MINIO_BUCKET,
+            bucket_name=UPLOADS_BUCKET,
             object_name=storage_path,
             data=bytes_data,
             length=len(bytes_data),
         )
-    except Exception as err:
-        raise ActivityExceptions.FileUploadError(detail=f"{type(err)}: {err}")
+    except Exception as exc:
+        raise ActivityExceptions.FileUploadError(exception=exc)
 
-    _id = uuid.uuid4()
     await ActivityTable.create(
-        id=_id,
+        id=activity_id,
         name=name,
         task=task,
         user_id=user_id,
@@ -83,24 +80,24 @@ async def create_activity(
     )
 
     df = bytes_to_df(bytes_data)
-    df = df.rename(columns={"review": C.DATASET_TEXT_COLUMN_NAME})
+    df = df.rename(columns={"review": DATASET_TEXT_COLUMN_NAME})
 
-    documents = df[[C.DATASET_INDEX_COLUMN_NAME, C.DATASET_TEXT_COLUMN_NAME]].to_dict(
+    documents = df[[DATASET_INDEX_COLUMN_NAME, DATASET_TEXT_COLUMN_NAME]].to_dict(
         orient="records"
     )
 
     await DocumentTable.bulk_create(
         [
             DocumentTable(
-                index=doc[C.DATASET_INDEX_COLUMN_NAME],
-                text=doc[C.DATASET_TEXT_COLUMN_NAME],
-                activity_id=_id,
+                index=doc[DATASET_INDEX_COLUMN_NAME],
+                text=doc[DATASET_TEXT_COLUMN_NAME],
+                activity_id=activity_id,
             )
             for doc in documents
         ]
     )
 
-    return ActivityStatus(id=_id, status=ActivityStatusEnum.created)
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.CREATED)
 
 
 @router.get("/list", response_model=list[Activity])
@@ -152,10 +149,10 @@ async def fetch_activity_data(
     try:
         client = MinioObjectStore()
         bytes_data = client.download_object_as_bytes(
-            bucket_name=MINIO_BUCKET, object_name=storage_path
+            bucket_name=UPLOADS_BUCKET, object_name=storage_path
         )
-    except Exception as err:
-        raise ActivityExceptions.FileDownloadError(detail=f"{type(err)}: {err}")
+    except Exception as exc:
+        raise ActivityExceptions.FileDownloadError(exception=exc)
 
     df = bytes_to_df(bytes_data)
     df = df.rename(columns={"review": "text"})
@@ -204,7 +201,38 @@ async def fetch_activity_data(
             objects=[DocumentTable(id=doc.id, labels=doc.labels) for doc in documents],
             fields=["labels"],
         )
-    except Exception as err:
-        raise ActivityExceptions.ActivitySaveError()
+    except Exception as exc:
+        raise ActivityExceptions.ActivitySaveError(exception=exc)
 
-    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.saved)
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.SAVED)
+
+
+@router.post("/{activity_id}/train", response_model=ActivityStatus)
+async def train_activity_model(
+    activity_id: str,
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    await validate_activity_exists(user_id, activity_id)
+
+    try:
+        arq_redis = await create_pool(
+            RedisSettings(host=env("REDIS_HOST", "redis"), port=env("REDIS_PORT", 6379))
+        )
+    except redis.exceptions.ConnectionError as e:
+        raise ActivityExceptions.RedisConnectionError
+
+    job = await arq_redis.enqueue_job(
+        "train_multilabel_classifier",
+        activity_id,
+    )
+
+    print(job)
+
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.TRAINING)
+

@@ -14,6 +14,14 @@ services:
     volumes:
       - ./.volumes/postgres:/var/lib/postgresql/data
 
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    command: redis-server
+    ports:
+      - "6379:6379"
+
   api:
     build:
       context: .
@@ -24,6 +32,12 @@ services:
       - JWT_SECRET=535f6cd72079e2d7eee8251816977b14c0623e3814fecfe1803b7a9c2f498565
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - MINIO_ENDPOINT=minio:9000
       - MINIO_BUCKET=tagmate
       - MINIO_ROOT_USER=minioadmin
@@ -34,6 +48,32 @@ services:
       - ./tagmate:/applications/tagmate
     depends_on:
       - postgres
+      - redis
+      - minio
+
+  worker:
+    build:
+      context: .
+      dockerfile: ./Dockerfile.worker
+    container_name: worker
+    restart: always
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_BUCKET=tagmate
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - ./tagmate:/applications/tagmate
+      - ./.volumes/worker/cache:/root/.cache
+    depends_on:
+      - postgres
+      - redis
       - minio
 
   minio:
