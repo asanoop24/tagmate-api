@@ -12,7 +12,9 @@ RUN --mount=type=cache,target=/root/.cache \
     pip install -r requirements.txt
 
 COPY tagmate/models/ /applications/tagmate/models/
+COPY tagmate/classifiers/ /applications/tagmate/classifiers/
 COPY tagmate/storage/ /applications/tagmate/storage/
+COPY tagmate/logging/ /applications/tagmate/logging/
 COPY tagmate/exceptions/ /applications/tagmate/exceptions/
 COPY tagmate/utils/ /applications/tagmate/utils/
 COPY tagmate/*.py /applications/tagmate/

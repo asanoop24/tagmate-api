@@ -44,8 +44,9 @@ services:
       - MINIO_ROOT_PASSWORD=minioadmin
     ports:
       - 8000:8000
-    volumes:
-      - ./tagmate:/applications/tagmate
+    # uncomment the volume mapping if hot reload is required
+    # volumes:
+    #   - ./tagmate:/applications/tagmate
     depends_on:
       - postgres
       - redis
@@ -69,7 +70,6 @@ services:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
     volumes:
-      - ./tagmate:/applications/tagmate
       - ./.volumes/worker/cache:/root/.cache
     depends_on:
       - postgres
