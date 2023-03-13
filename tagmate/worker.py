@@ -25,7 +25,7 @@ async def train_multilabel_classifier(ctx, activity_id: int, metadata: dict = {}
     job_logger = JobLogger(job_id=ctx["job_id"])
     classifier = MultiLabelClassifier(
         activity_id=activity_id,
-        job_logger=job_logger,
+        logger=job_logger,
     )
     response = await classifier.train_classifier()
     return response

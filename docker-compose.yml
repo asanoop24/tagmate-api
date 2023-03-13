@@ -45,8 +45,8 @@ services:
     ports:
       - 8000:8000
     # uncomment the volume mapping if hot reload is required
-    # volumes:
-    #   - ./tagmate:/applications/tagmate
+    volumes:
+      - ./tagmate:/applications/tagmate
     depends_on:
       - postgres
       - redis

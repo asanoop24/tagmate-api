@@ -6,6 +6,7 @@ from datasets import Dataset
 from sentence_transformers.losses import CosineSimilarityLoss
 from setfit import SetFitModel, SetFitTrainer
 import pandas as pd
+import numpy as np
 
 from tagmate.classifiers.base import Classifier
 from tagmate.models.db.activity import (
@@ -26,16 +27,16 @@ METRIC = "accuracy"
 
 
 class MultiLabelClassifier(Classifier):
-    def __init__(self, activity_id: str, job_logger: JobLogger):
+    def __init__(self, activity_id: str, logger: JobLogger | None = None):
         self.activity_id = activity_id
-        self.logger = job_logger
+        self.logger = logger
+        self.is_multilabel = False
 
-    async def fetch_activity_from_db(self, activity_id: str):
-        activity = await ActivityTable.get(id=activity_id)
-        return activity
+    async def fetch_activity_from_db(self):
+        self.activity = await ActivityTable.get(id=self.activity_id)
 
-    async def fetch_activity_documents(self, activity_id: str):
-        documents = await DocumentTable.filter(activity_id=activity_id)
+    async def get_activity_documents(self):
+        documents = await DocumentTable.filter(activity_id=self.activity_id)
         return documents
 
     @staticmethod
@@ -53,7 +54,7 @@ class MultiLabelClassifier(Classifier):
             num_iterations=NUM_ITERATIONS,
             num_epochs=1,
         )
-        self.trainer.train()
+        # self.trainer.train()
 
     # def evaluate(self):
     #     metrics = self.trainer.evaluate()
@@ -67,6 +68,21 @@ class MultiLabelClassifier(Classifier):
     #     probs = self.model.predict_proba(data)
     #     return probs
 
+    async def get_activity_tags(self):
+        # self.tags = self.activity.tags.sort()
+        self.tags = sorted(["maintenance", "neighborhood", "parking", "pets"])
+        self.label_encoder = {tag: idx for idx, tag in enumerate(self.tags)}
+        self.label_decoder = {idx: tag for idx, tag in enumerate(self.tags)}
+
+    def encode_labels(self, label: list[str] | str):
+        if self.is_multilabel:
+            encoded = np.zeros(len(self.tags), dtype=int)
+            for lbl in label:
+                encoded[self.label_encoder[lbl]] = 1
+        else:
+            encoded = self.label_encoder[label]
+        return encoded
+
     def convert_documents_to_df(self, documents: list[DocumentTable]) -> pd.DataFrame:
         documents_list = [[doc.text, doc.labels] for doc in documents]
         documents_df = pd.DataFrame(data=documents_list, columns=["text", "label"])
@@ -74,19 +90,25 @@ class MultiLabelClassifier(Classifier):
 
         ### TODO: Remove after testing
         def get_random_label(x):
-            return random.choice(["parking", "neighborhood", "maintenance", "pets"])
+            if self.is_multilabel:
+                return [
+                    random.choice(["parking", "neighborhood", "maintenance", "pets"])
+                ]
+            else:
+                return random.choice(["parking", "neighborhood", "maintenance", "pets"])
 
-        documents_df["label"] = documents_df["label"].apply(get_random_label)
-        self.logger.info(f"df length: {documents_df.shape}")
+        documents_df["label"] = (
+            documents_df["label"].apply(get_random_label).apply(self.encode_labels)
+        )
+        self.logger.info(f"df length: {documents_df[:3]}")
         return documents_df
 
     def convert_df_to_dataset(self, documents_df: pd.DataFrame) -> Dataset:
         documents_ds = Dataset.from_pandas(documents_df)
         return documents_ds
 
-    async def save_model(self):
-        activity = await ActivityTable.get(id=self.activity_id)
-        user_id = str(activity.user_id)
+    def save_model(self):
+        user_id = str(self.activity.user_id)
         storage_path = joinpath(user_id, self.activity_id)
 
         with SoftTemporaryDirectory() as tmpdir:
@@ -99,9 +121,8 @@ class MultiLabelClassifier(Classifier):
                 folder_path=local_storage_path,
             )
 
-    async def load_model(self):
-        activity = await ActivityTable.get(id=self.activity_id)
-        user_id = str(activity.user_id)
+    def load_model(self):
+        user_id = str(self.activity.user_id)
         storage_path = joinpath(user_id, self.activity_id)
         client = self.get_object_store()
 
@@ -120,11 +141,22 @@ class MultiLabelClassifier(Classifier):
                 self.logger.info(f"Found an earlier model version with id: {MODEL_ID}")
                 self.model = SetFitModel.from_pretrained(tmpdir)
 
+    def predict(self, texts: list[str]):
+        self.load_model()
+        return [self.label_decoder[pred.item()] for pred in self.model(texts)]
+
     async def train_classifier(self):
         await db_init()
-        documents = await self.fetch_activity_documents(self.activity_id)
+        await self.get_activity_tags()
+        await self.fetch_activity_from_db()
+
+        documents = await self.get_activity_documents()
         documents_df = self.convert_documents_to_df(documents)
         documents_ds = self.convert_df_to_dataset(documents_df)
-        await self.load_model()
+
+        self.load_model()
         self.train(documents_ds)
-        await self.save_model()
+        self.save_model()
+        self.logger.info(
+            f"model generated prediction: {self.predict(['Items are highly priced compared to local market!'])}"
+        )

@@ -1,5 +1,6 @@
 import time
 import uuid
+import datetime
 from os import getenv as env
 from os.path import join as joinpath
 from arq import create_pool
@@ -198,8 +199,8 @@ async def fetch_activity_data(
 
     try:
         await DocumentTable.bulk_update(
-            objects=[DocumentTable(id=doc.id, labels=doc.labels) for doc in documents],
-            fields=["labels"],
+            objects=[DocumentTable(id=doc.id, labels=doc.labels, updated_at=datetime.datetime.utcnow()) for doc in documents],
+            fields=["labels", "updated_at"],
         )
     except Exception as exc:
         raise ActivityExceptions.ActivitySaveError(exception=exc)

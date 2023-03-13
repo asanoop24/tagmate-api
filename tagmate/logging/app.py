@@ -10,9 +10,9 @@ BASELOGFMT = f"[time] %(asctime)s.%(msecs)03d{SEP}[level] %(levelname)-6s [logge
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 ENABLE_LOGGERS = [
-    *logging.root.manager.loggerDict.keys(),
-    "root",
-    "tagmate",
+    # *logging.root.manager.loggerDict.keys(),
+    # "root",
+    "tagmate.app",
     "tortoise",
     "tortoise.db_client",
     "minio",
