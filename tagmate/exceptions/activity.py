@@ -57,6 +57,17 @@ class ActivitySaveError(HTTPException):
         super().__init__(status_code=status_code, detail=detail)
 
 
+class ActivityDeleteError(HTTPException):
+    def __init__(
+        self,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not delete the activity",
+        exception=None,
+    ):
+        logger.exception(exception)
+        super().__init__(status_code=status_code, detail=detail)
+
+
 class RedisConnectionError(HTTPException):
     def __init__(
         self,

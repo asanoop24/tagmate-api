@@ -237,3 +237,23 @@ async def train_activity_model(
 
     return ActivityStatus(id=activity_id, status=ActivityStatusEnum.TRAINING)
 
+
+@router.delete("/{activity_id}", response_model=ActivityStatus)
+async def fetch_activity_data(
+    activity_id: str,
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    activity = await validate_activity_exists(user_id, activity_id)
+
+    try:
+        await ActivityTable.delete(activity)
+    except Exception as exc:
+        raise ActivityExceptions.ActivityDeleteError(exception=exc)
+
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.DELETED)
