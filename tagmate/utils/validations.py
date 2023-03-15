@@ -2,7 +2,7 @@ from tortoise import exceptions as TortoiseExceptions
 
 from tagmate.exceptions import activity as ActivityExceptions
 from tagmate.exceptions import auth as AuthExceptions
-from tagmate.models.db.activity import Activity as ActivityTable
+from tagmate.models.db.activity import Activity as ActivityTable, ActivityUserMap as ActivityUserTable
 from tagmate.models.db.user import User as UserTable
 from tagmate.models.py.activity import Activity
 from tagmate.models.py.user import User
@@ -42,7 +42,7 @@ async def validate_activity_exists(user_id: str, activity_id: str) -> Activity:
         Activity: activity details
     """
     try:
-        activity = await ActivityTable.get(user_id=user_id, id=activity_id)
+        activity = await ActivityUserTable.get(user_id=user_id, activity_id=activity_id)
         return activity
     except TortoiseExceptions.DoesNotExist as exc:
         raise ActivityExceptions.ActivityDoesNotExist(exception=exc)

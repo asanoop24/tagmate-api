@@ -13,7 +13,10 @@ from tortoise import exceptions as TortoiseExceptions
 
 from tagmate.exceptions import activity as ActivityExceptions
 from tagmate.exceptions import auth as AuthExceptions
-from tagmate.models.db.activity import Activity as ActivityTable
+from tagmate.models.db.activity import (
+    Activity as ActivityTable,
+    ActivityUserMap as ActivityUserTable,
+)
 from tagmate.models.db.activity import Document as DocumentTable
 from tagmate.models.db.user import User as UserTable
 from tagmate.models.py.activity import (
@@ -26,11 +29,15 @@ from tagmate.models.py.activity import (
 from tagmate.models.enums import ActivityStatusEnum, ActivityTaskEnum
 from tagmate.models.py.user import User
 from tagmate.storage.minio import MinioObjectStore
-from tagmate.utils.constants import UPLOADS_BUCKET, DATASET_INDEX_COLUMN_NAME, DATASET_TEXT_COLUMN_NAME
+from tagmate.utils.constants import (
+    UPLOADS_BUCKET,
+    DATASET_INDEX_COLUMN_NAME,
+    DATASET_TEXT_COLUMN_NAME,
+)
 from tagmate.utils.auth import authenticate_with_token
 from tagmate.utils.functions import bytes_to_df
 from tagmate.utils.validations import validate_activity_exists, validate_user_exists
-
+from tagmate.logging.app import logger
 
 
 router = APIRouter(prefix="/activity", tags=["activity"])
@@ -80,6 +87,12 @@ async def create_activity(
         storage_path=storage_path,
     )
 
+    await ActivityUserTable.create(
+        activity_id=activity_id,
+        user_id=user_id,
+        is_owner=True,
+    )
+
     df = bytes_to_df(bytes_data)
     df = df.rename(columns={"review": DATASET_TEXT_COLUMN_NAME})
 
@@ -111,7 +124,15 @@ async def fetch_all_activities(email: str = Depends(authenticate_with_token)):
     user_id = user.id
 
     try:
-        activities = await ActivityTable.filter(user_id=user_id)
+        my_activities = await ActivityTable.filter(user_id=user_id)
+
+        shared_activity_ids = await ActivityUserTable.filter(
+            user_id=user_id, is_owner=False
+        ).values("activity_id")
+        shared_activity_ids = [a.get("activity_id") for a in shared_activity_ids]
+        shared_activities = await ActivityTable.filter(id__in=shared_activity_ids)
+
+        activities = my_activities + shared_activities
     except TortoiseExceptions.DoesNotExist:
         activities = []
 
@@ -128,39 +149,14 @@ async def fetch_one_activity(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    activity = await validate_activity_exists(user_id, activity_id)
-
-    return Activity(**activity)
-
-
-@router.get("/{activity_id}/data", response_model=list[Document])
-async def fetch_activity_data(
-    activity_id: str, email: str = Depends(authenticate_with_token)
-):
-    if not email:
-        raise AuthExceptions.InvalidToken()
-
-    user = await validate_user_exists(email)
-    user_id = user.id
-
-    activity = await validate_activity_exists(user_id, activity_id)
-
-    storage_path = activity.storage_path
-
+    await validate_activity_exists(user_id, activity_id)
     try:
-        client = MinioObjectStore()
-        bytes_data = client.download_object_as_bytes(
-            bucket_name=UPLOADS_BUCKET, object_name=storage_path
-        )
-    except Exception as exc:
-        raise ActivityExceptions.FileDownloadError(exception=exc)
+        activity = await ActivityTable.get(id=activity_id)
+        logger.info(activity)
+    except TortoiseExceptions.DoesNotExist:
+        activity = []
 
-    df = bytes_to_df(bytes_data)
-    df = df.rename(columns={"review": "text"})
-
-    documents = df[["index", "text"]].to_dict(orient="records")
-
-    return [Document(**doc) for doc in documents]
+    return activity
 
 
 @router.get("/{activity_id}/load", response_model=list[Document])
@@ -183,6 +179,31 @@ async def fetch_activity_data(
     return documents
 
 
+@router.get("/{activity_id}/users", response_model=list[User])
+async def fetch_activity_users(
+    activity_id: str, email: str = Depends(authenticate_with_token)
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    await validate_activity_exists(user_id, activity_id)
+
+    try:
+        user_ids = await ActivityUserTable.filter(activity_id=activity_id).values(
+            "user_id"
+        )
+        user_ids = [u.get("user_id") for u in user_ids]
+        users = await UserTable.filter(id__in=user_ids)
+    except TortoiseExceptions.DoesNotExist:
+        users = []
+
+    # TODO: Remove password hash from the response
+    return users
+
+
 @router.post("/{activity_id}/save", response_model=ActivityStatus)
 async def fetch_activity_data(
     activity_id: str,
@@ -199,13 +220,52 @@ async def fetch_activity_data(
 
     try:
         await DocumentTable.bulk_update(
-            objects=[DocumentTable(id=doc.id, labels=doc.labels, updated_at=datetime.datetime.utcnow()) for doc in documents],
+            objects=[
+                DocumentTable(
+                    id=doc.id, labels=doc.labels, updated_at=datetime.datetime.utcnow()
+                )
+                for doc in documents
+            ],
             fields=["labels", "updated_at"],
         )
     except Exception as exc:
         raise ActivityExceptions.ActivitySaveError(exception=exc)
 
     return ActivityStatus(id=activity_id, status=ActivityStatusEnum.SAVED)
+
+
+@router.post("/{activity_id}/share", response_model=ActivityStatus)
+async def fetch_activity_data(
+    activity_id: str,
+    share_email: str,
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    await validate_activity_exists(user_id, activity_id)
+
+    share_user = await validate_user_exists(share_email)
+    share_user_id = share_user.id
+
+    try:
+        assert user_id != share_user_id
+    except AssertionError as exc:
+        raise AuthExceptions.InvalidUsername()
+
+    try:
+        await ActivityUserTable.create(
+            activity_id=activity_id,
+            user_id=share_user_id,
+            is_owner=False,
+        )
+    except Exception as exc:
+        raise ActivityExceptions.ActivitySaveError(exception=exc)
+
+    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.SHARED)
 
 
 @router.post("/{activity_id}/train", response_model=ActivityStatus)

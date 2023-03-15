@@ -48,18 +48,19 @@ class WorkerSettings:
     allow_abort_jobs = True
 
 
-LoggerSettings = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {
-        "standard": {
-            "level": LOG_LEVEL,
-            "class": "logging.StreamHandler",
-            "formatter": "standard",
+class LoggerSettings:
+    config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {
+            "standard": {
+                "level": LOG_LEVEL,
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+            },
         },
-    },
-    "formatters": {"standard": {"format": BASELOGFMT, "datefmt": DATEFMT}},
-    "loggers": {
-        "arq": {"handlers": ["standard"], "level": LOG_LEVEL},
-    },
-}
+        "formatters": {"standard": {"format": BASELOGFMT, "datefmt": DATEFMT}},
+        "loggers": {
+            "arq": {"handlers": ["standard"], "level": LOG_LEVEL},
+        },
+    }
