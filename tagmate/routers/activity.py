@@ -36,7 +36,7 @@ from tagmate.utils.constants import (
 )
 from tagmate.utils.auth import authenticate_with_token
 from tagmate.utils.functions import bytes_to_df
-from tagmate.utils.validations import validate_activity_exists, validate_user_exists
+from tagmate.utils.validations import validate_activity_exists, validate_user_exists, validate_activity_user
 from tagmate.logging.app import logger
 
 
@@ -149,7 +149,9 @@ async def fetch_one_activity(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
+
     try:
         activity = await ActivityTable.get(id=activity_id)
         logger.info(activity)
@@ -169,7 +171,8 @@ async def fetch_activity_data(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
 
     try:
         documents = await DocumentTable.filter(activity_id=activity_id)
@@ -189,7 +192,8 @@ async def fetch_activity_users(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
 
     try:
         user_ids = await ActivityUserTable.filter(activity_id=activity_id).values(
@@ -216,7 +220,8 @@ async def fetch_activity_data(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
 
     try:
         await DocumentTable.bulk_update(
@@ -246,10 +251,21 @@ async def fetch_activity_data(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
-
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
+    
     share_user = await validate_user_exists(share_email)
     share_user_id = share_user.id
+
+    try:
+        await validate_activity_user(share_user_id, activity_id)
+        # raise error if activity is already shared with user
+        raise ActivityExceptions.ActivityAlreadyExists()
+    except ActivityExceptions.ActivityAlreadyExists:
+        raise
+    except ActivityExceptions.ActivityDoesNotExist:
+        pass
+
 
     try:
         assert user_id != share_user_id
@@ -279,7 +295,8 @@ async def train_activity_model(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    await validate_activity_exists(user_id, activity_id)
+    await validate_activity_exists(activity_id)
+    await validate_activity_user(user_id, activity_id)
 
     try:
         arq_redis = await create_pool(
@@ -309,7 +326,8 @@ async def fetch_activity_data(
     user = await validate_user_exists(email)
     user_id = user.id
 
-    activity = await validate_activity_exists(user_id, activity_id)
+    activity = await validate_activity_exists(activity_id)
+    # await validate_activity_user(user_id, activity_id)
 
     try:
         await ActivityTable.delete(activity)
