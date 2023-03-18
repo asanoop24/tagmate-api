@@ -1,9 +1,11 @@
 from os import getenv as env
 from arq.connections import RedisSettings
 from httpx import AsyncClient
+from dataclasses import dataclass
 
 from tagmate.classifiers.entity_classification import EntityClassifier
 from tagmate.classifiers.multi_label_classification import MultiLabelClassifier
+from tagmate.classifiers.clustering import ClusterBuilder
 from tagmate.logging.worker import LOG_LEVEL, BASELOGFMT, DATEFMT, JobLogger
 import logging
 
@@ -39,8 +41,18 @@ async def train_entity_classifier(ctx, activity_id: int, metadata: dict = {}):
     return response
 
 
+async def cluster_documents(ctx, activity_id: int):
+    job_logger = JobLogger(job_id=ctx["job_id"])
+    builder = ClusterBuilder(
+        activity_id=activity_id,
+        logger=job_logger,
+    )
+    response = await builder.run_clustering()
+    return response
+
+
 class WorkerSettings:
-    functions = [train_multilabel_classifier, train_entity_classifier]
+    functions = [train_multilabel_classifier, train_entity_classifier, cluster_documents]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings(host=env("REDIS_HOST"), port=env("REDIS_PORT"))
@@ -48,8 +60,7 @@ class WorkerSettings:
     allow_abort_jobs = True
 
 
-class LoggerSettings:
-    config = {
+LoggerSettings = {
         "version": 1,
         "disable_existing_loggers": False,
         "handlers": {

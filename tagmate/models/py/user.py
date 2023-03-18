@@ -1,11 +1,12 @@
 from pydantic import BaseModel
 from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise import Tortoise
 import uuid
 
-from tagmate.models.db import user
+from tagmate.models.db.user import User as UserTable
 
-
-User = pydantic_model_creator(user.User)
+# Tortoise.init_models(["tagmate.models.db.user", "tagmate.models.db.activity"], "models")
+User = pydantic_model_creator(UserTable)
 
 
 class UserId(BaseModel):

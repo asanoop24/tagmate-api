@@ -31,9 +31,18 @@ class Document(Model):
     text = fields.TextField(null=False)
     activity = fields.ForeignKeyField(model_name="models.Activity", to_field="id")
     labels = fields.JSONField(default=[], null=True)
+    clusters = fields.JSONField(default=[], null=True)
     # user = fields.ForeignKeyField(model_name="models.User", to_field="id")
     # is_auto_generated = fields.BooleanField(default=False, description="True if the labels for the document are suggested by the Few Shot Classifier")
     # is_user_validated = fields.BooleanField(default=True, description="True if the suggested labels have been validated by the user")
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+
+class Cluster(Model):
+    id = fields.UUIDField(pk=True)
+    index = fields.IntField()
+    theme = fields.TextField(null=False)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 

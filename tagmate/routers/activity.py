@@ -1,3 +1,4 @@
+from tortoise import Tortoise, fields, run_async
 import time
 import uuid
 import datetime
@@ -111,6 +112,20 @@ async def create_activity(
         ]
     )
 
+    try:
+        arq_redis = await create_pool(
+            RedisSettings(host=env("REDIS_HOST", "redis"), port=env("REDIS_PORT", 6379))
+        )
+    except redis.exceptions.ConnectionError as e:
+        raise ActivityExceptions.RedisConnectionError
+
+    job = await arq_redis.enqueue_job(
+        "cluster_documents",
+        activity_id,
+    )
+
+    logger.info(job)
+
     return ActivityStatus(id=activity_id, status=ActivityStatusEnum.CREATED)
 
 
@@ -125,7 +140,6 @@ async def fetch_all_activities(email: str = Depends(authenticate_with_token)):
 
     try:
         my_activities = await ActivityTable.filter(user_id=user_id)
-
         shared_activity_ids = await ActivityUserTable.filter(
             user_id=user_id, is_owner=False
         ).values("activity_id")
@@ -135,7 +149,7 @@ async def fetch_all_activities(email: str = Depends(authenticate_with_token)):
         activities = my_activities + shared_activities
     except TortoiseExceptions.DoesNotExist:
         activities = []
-
+    
     return activities
 
 
