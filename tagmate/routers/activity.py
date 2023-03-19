@@ -37,7 +37,11 @@ from tagmate.utils.constants import (
 )
 from tagmate.utils.auth import authenticate_with_token
 from tagmate.utils.functions import bytes_to_df
-from tagmate.utils.validations import validate_activity_exists, validate_user_exists, validate_activity_user
+from tagmate.utils.validations import (
+    validate_activity_exists,
+    validate_user_exists,
+    validate_activity_user,
+)
 from tagmate.logging.app import logger
 
 
@@ -48,6 +52,7 @@ router = APIRouter(prefix="/activity", tags=["activity"])
 async def create_activity(
     name: str = Form(..., description="name of the activity"),
     task: str = Form(..., description="task of the activity"),
+    tags: str = Form(..., description="tags of the activity"),
     data: UploadFile = File(..., description="data for the activity"),
     email: str = Depends(authenticate_with_token),
 ):
@@ -58,6 +63,8 @@ async def create_activity(
 
     user_id = str(user.id)
     activity_id = str(uuid.uuid4())
+
+    tags = list(set([tag.strip() for tag in tags.split("\n") if len(str(tag))]))
 
     file_name = data.filename
     storage_path = joinpath(user_id, activity_id, file_name)
@@ -83,6 +90,7 @@ async def create_activity(
         id=activity_id,
         name=name,
         task=task,
+        tags=tags,
         user_id=user_id,
         file_name=file_name,
         storage_path=storage_path,
@@ -149,7 +157,7 @@ async def fetch_all_activities(email: str = Depends(authenticate_with_token)):
         activities = my_activities + shared_activities
     except TortoiseExceptions.DoesNotExist:
         activities = []
-    
+
     return activities
 
 
@@ -267,7 +275,7 @@ async def fetch_activity_data(
 
     await validate_activity_exists(activity_id)
     await validate_activity_user(user_id, activity_id)
-    
+
     share_user = await validate_user_exists(share_email)
     share_user_id = share_user.id
 
@@ -279,7 +287,6 @@ async def fetch_activity_data(
         raise
     except ActivityExceptions.ActivityDoesNotExist:
         pass
-
 
     try:
         assert user_id != share_user_id
