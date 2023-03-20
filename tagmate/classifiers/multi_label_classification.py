@@ -151,7 +151,6 @@ class MultiLabelClassifier(Classifier):
             [self.label_decoder[idx.item()] for idx in torch.argwhere(pred == 1)]
             for pred in preds
         ]
-        self.logger.info(self.preds)
 
     async def save_predictions(self):
         documents_to_save = [

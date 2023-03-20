@@ -350,8 +350,27 @@ async def train_activity_model(
     return JobStatus(id=_job_id, status=job_status)
 
 
+@router.get("/{activity_id}/job/active", response_model=JobStatus)
+async def get_active_job(
+    activity_id: str,
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    try:
+        active_job = await JobTable.get(activity_id=activity_id, status__in=[JobStatusEnum.queued, JobStatusEnum.in_progress])
+    except TortoiseExceptions.DoesNotExist as e:
+        raise ActivityExceptions.ActivityDoesNotExist
+
+    return JobStatus(id=active_job.id, status=active_job.status)
+
+
 @router.get("/{activity_id}/job/{job_id}/status", response_model=JobStatus)
-async def train_activity_model(
+async def get_job_status(
     activity_id: str,
     job_id: str,
     email: str = Depends(authenticate_with_token),
