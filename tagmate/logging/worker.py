@@ -13,6 +13,8 @@ JOB_LOGGER_NAME = "tagmate.worker.job"
 
 ENABLE_LOGGERS = [
     # "root",
+    "arq",
+    "arq.worker",
     "tortoise",
     "tortoise.db_client",
     "minio",

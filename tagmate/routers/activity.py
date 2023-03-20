@@ -17,14 +17,17 @@ from tagmate.exceptions import auth as AuthExceptions
 from tagmate.models.db.activity import (
     Activity as ActivityTable,
     ActivityUserMap as ActivityUserTable,
+    Document as DocumentTable,
+    Job as JobTable,
 )
-from tagmate.models.db.activity import Document as DocumentTable
 from tagmate.models.db.user import User as UserTable
 from tagmate.models.py.activity import (
     Activity,
     ActivityCreate,
     ActivityId,
     ActivityStatus,
+    JobStatus,
+    JobStatusEnum,
     Document,
 )
 from tagmate.models.enums import ActivityStatusEnum, ActivityTaskEnum
@@ -128,7 +131,7 @@ async def create_activity(
         raise ActivityExceptions.RedisConnectionError
 
     job = await arq_redis.enqueue_job(
-        "cluster_documents",
+        ActivityTaskEnum.CLUSTERING,
         activity_id,
     )
 
@@ -305,7 +308,7 @@ async def fetch_activity_data(
     return ActivityStatus(id=activity_id, status=ActivityStatusEnum.SHARED)
 
 
-@router.post("/{activity_id}/train", response_model=ActivityStatus)
+@router.post("/{activity_id}/train", response_model=JobStatus)
 async def train_activity_model(
     activity_id: str,
     email: str = Depends(authenticate_with_token),
@@ -326,14 +329,59 @@ async def train_activity_model(
     except redis.exceptions.ConnectionError as e:
         raise ActivityExceptions.RedisConnectionError
 
+    jobs = await JobTable.filter(activity_id=activity_id, status__in=[JobStatusEnum.queued, JobStatusEnum.in_progress, JobStatusEnum.deferred])
+    if len(jobs):
+        raise ActivityExceptions.JobAlreadyInProgress
+
+    _job_id = str(uuid.uuid4())
     job = await arq_redis.enqueue_job(
-        "train_multilabel_classifier",
-        activity_id,
+        ActivityTaskEnum.MULTI_LABEL_CLASSIFICATION,
+        activity_id=activity_id,
+        _job_id=_job_id,
     )
 
-    print(job)
+    job_status = await job.status()
+    await JobTable.create(
+        id=_job_id,
+        activity_id=activity_id,
+        status=job_status,
+    )
 
-    return ActivityStatus(id=activity_id, status=ActivityStatusEnum.TRAINING)
+    return JobStatus(id=_job_id, status=job_status)
+
+
+@router.get("/{activity_id}/job/{job_id}/status", response_model=JobStatus)
+async def train_activity_model(
+    activity_id: str,
+    job_id: str,
+    email: str = Depends(authenticate_with_token),
+):
+    if not email:
+        raise AuthExceptions.InvalidToken()
+
+    user = await validate_user_exists(email)
+    user_id = user.id
+
+    try:
+        arq_redis = await create_pool(
+            RedisSettings(host=env("REDIS_HOST", "redis"), port=env("REDIS_PORT", 6379))
+        )
+    except redis.exceptions.ConnectionError as e:
+        raise ActivityExceptions.RedisConnectionError
+
+    job = Job(job_id=job_id, redis=arq_redis)
+    job_status = await job.status()
+
+    match job_status:
+        case JobStatusEnum.not_found:
+            return JobStatus(id=job_id, status=job_status)
+        case JobStatusEnum.complete:
+            job_result = await job.result_info()
+            if job_result.success:
+                return JobStatus(id=job_id, status=JobStatusEnum.success)
+            return JobStatus(id=job_id, status=JobStatusEnum.failed)
+
+    return JobStatus(id=job_id, status=job_status)
 
 
 @router.delete("/{activity_id}", response_model=ActivityStatus)

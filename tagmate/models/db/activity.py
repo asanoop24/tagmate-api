@@ -2,8 +2,7 @@ from tortoise import Tortoise, fields, run_async
 from tortoise.models import Model
 
 from tagmate.utils.database import DB_URI
-from tagmate.models.enums import ActivityStatusEnum
-
+from tagmate.models.enums import ActivityStatusEnum, JobStatusEnum
 
 class Activity(Model):  # type: ignore
     id = fields.UUIDField(pk=True)
@@ -33,8 +32,8 @@ class Document(Model):
     labels = fields.JSONField(default=[], null=True)
     clusters = fields.JSONField(default=[], null=True)
     # user = fields.ForeignKeyField(model_name="models.User", to_field="id")
-    # is_auto_generated = fields.BooleanField(default=False, description="True if the labels for the document are suggested by the Few Shot Classifier")
-    # is_user_validated = fields.BooleanField(default=True, description="True if the suggested labels have been validated by the user")
+    is_auto_generated = fields.BooleanField(default=False, description="True if the labels for the document are suggested by the Few Shot Classifier")
+    is_user_validated = fields.BooleanField(default=False, description="True if the suggested labels have been validated by the user")
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
@@ -43,6 +42,14 @@ class Cluster(Model):
     id = fields.UUIDField(pk=True)
     index = fields.IntField()
     theme = fields.TextField(null=False)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+
+class Job(Model):
+    id = fields.UUIDField(pk=True)
+    activity = fields.ForeignKeyField(model_name="models.Activity", to_field="id", null=False)
+    status = fields.CharEnumField(enum_type=JobStatusEnum, default=JobStatusEnum.complete, null=False)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
